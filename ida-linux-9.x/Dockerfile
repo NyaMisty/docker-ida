@@ -59,11 +59,12 @@ RUN cd /opt/ida && python3 keygen-v2.py --oneshot --name docker-ida
 RUN if [ -f /opt/ida/idalib/python/setup.py ] || [ -f /opt/ida/idalib/python/pyproject.toml ]; then \
         pip install /opt/ida/idalib/python; \
     else \
-        pip install "$(find /opt/ida -path '*/plugins/idapro*' -name 'idapro*.whl' -print -quit)"; \
+        WHEEL="$(find /opt/ida -name 'idapro*.whl' -print -quit)"; \
+        if [ -n "$WHEEL" ]; then pip install "$WHEEL"; fi; \
     fi && \
     if [ -f /opt/ida/py-activate-idalib.py ]; then \
         python3 /opt/ida/py-activate-idalib.py; \
-    else \
+    elif [ -f /opt/ida/idalib/python/py-activate-idalib.py ]; then \
         python3 /opt/ida/idalib/python/py-activate-idalib.py; \
     fi
 
