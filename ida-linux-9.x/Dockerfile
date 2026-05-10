@@ -56,7 +56,16 @@ ADD keygen-v2.py /opt/ida
 RUN cd /opt/ida && python3 keygen-v2.py --oneshot --name docker-ida
 
 # Setup idalib
-RUN cd /opt/ida/idalib/python && pip install . && python3 py-activate-idalib.py
+RUN if [ -f /opt/ida/idalib/python/setup.py ] || [ -f /opt/ida/idalib/python/pyproject.toml ]; then \
+        pip install /opt/ida/idalib/python; \
+    else \
+        pip install "$(find /opt/ida -path '*/plugins/idapro*' -name 'idapro*.whl' -print -quit)"; \
+    fi && \
+    if [ -f /opt/ida/py-activate-idalib.py ]; then \
+        python3 /opt/ida/py-activate-idalib.py; \
+    else \
+        python3 /opt/ida/idalib/python/py-activate-idalib.py; \
+    fi
 
 # Bypass EULA Dialog
 RUN python3 -c "import idapro; import idaapi; idaapi.reg_write_int('EULA 90', 1)"
