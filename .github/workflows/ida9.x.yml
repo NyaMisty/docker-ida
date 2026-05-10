@@ -40,15 +40,69 @@ jobs:
               PYTHON_VERSION=3.12.10
               QT=6
             tag_name: "9.2"
+
+          - name: "IDA 9.3"
+            installer: ida-pro_93_x64linux.run
+            build-args: |
+              PYTHON_VERSION=3.12.10
+            tag_name: "9.3"
       fail-fast: false
 
     runs-on: ubuntu-latest
     steps:
-      - 
+      -
         name: Checkout
         uses: actions/checkout@v2
-      -       
+        with:
+          fetch-depth: 0
+
+      -
+        name: Log in to the Container registry
+        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      -
+        name: Check ida-linux-9.x revision
+        id: ida9_revision
+        env:
+          GHCR_IMAGE: ghcr.io/nyamisty/docker-ida:${{ matrix.tag_name }}
+        run: |
+          set -euo pipefail
+
+          revision="$(git log -1 --format=%H -- ida-linux-9.x)"
+          echo "revision=${revision}" >> "$GITHUB_OUTPUT"
+
+          builder_args_json="$(jq -nc \
+            --arg installer "installers/${{ matrix.installer }}" \
+            --arg tool_package "installers/${{ matrix.tool_package || '' }}" \
+            --arg extra "${{ matrix.build-args }}" \
+            '{INSTALLER: $installer, TOOL_PACKAGE: $tool_package} + (($extra | split("\n") | map(select(length > 0)) | map(capture("^(?<key>[^=]+)=(?<value>.*)$")) | map({(.key): .value}) | add) // {})')"
+          builder_args="$(jq -nr --arg value "$builder_args_json" '$value | @uri')"
+          echo "builder_args=${builder_args}" >> "$GITHUB_OUTPUT"
+
+          if ! docker pull "$GHCR_IMAGE"; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "No existing ${GHCR_IMAGE}; building ida-linux-9.x revision ${revision}." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          image_revision="$(docker image inspect "$GHCR_IMAGE" | jq -r '.[0].Config.Labels["builder.file.revision"] // ""')"
+          image_builder_args="$(docker image inspect "$GHCR_IMAGE" | jq -r '.[0].Config.Labels["builder.args"] // ""')"
+
+          if [ "$image_revision" = "$revision" ] && [ "$image_builder_args" = "$builder_args" ]; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "Existing ${GHCR_IMAGE} already contains builder.file.revision ${revision} and matching builder.args; skipping build." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "Existing ${GHCR_IMAGE} contains builder.file.revision ${image_revision:-<none>} and builder.args ${image_builder_args:-<none>}; building ${revision}." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      -
         name: Set up Docker Buildx
+        if: steps.ida9_revision.outputs.should_build == 'true'
         id: buildx
         uses: docker/setup-buildx-action@v1
       #-     
@@ -59,21 +113,16 @@ jobs:
       #    key: ${{ runner.os }}-buildx-${{ github.sha }}
       #    restore-keys: |
       #      ${{ runner.os }}-buildx-
-      - 
-        uses: docker/login-action@v1 
+      -
+        if: steps.ida9_revision.outputs.should_build == 'true'
+        uses: docker/login-action@v1
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      - 
-        name: Log in to the Container registry
-        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       -
         name: Install Rclone
+        if: steps.ida9_revision.outputs.should_build == 'true'
         env:
           RCLONE_SERVACCOUNT: ${{ secrets.RCLONE_SERVACCOUNT }}
         run: |
@@ -93,8 +142,9 @@ jobs:
       #- name: Setup tmate session
       #  uses: mxschmitt/action-tmate@v3
       
-      - 
+      -
         name: Download IDA
+        if: steps.ida9_revision.outputs.should_build == 'true'
         run: |
             cd ./ida-linux-9.x
             mkdir -p installers
@@ -106,6 +156,7 @@ jobs:
 
       -
         name: Build & Push ${{ matrix.name }}
+        if: steps.ida9_revision.outputs.should_build == 'true'
         id: docker_build_ida
         uses: docker/build-push-action@v2
         with:
@@ -121,10 +172,14 @@ jobs:
             INSTALLER=installers/${{ matrix.installer }}
             TOOL_PACKAGE=installers/${{ matrix.tool_package || '' }}
             ${{ matrix.build-args }}
-            
+          labels: |
+            builder.file.revision=${{ steps.ida9_revision.outputs.revision }}
+            builder.args=${{ steps.ida9_revision.outputs.builder_args }}
+            org.opencontainers.image.revision=${{ steps.ida9_revision.outputs.revision }}
           tags: ida:${{ matrix.tag_name }}
       -
         name: Image digest
+        if: steps.ida9_revision.outputs.should_build == 'true'
         run: |
           set -x
           echo "Image built for ${{ matrix.name }}: ${{ steps.docker_build_ida.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
@@ -143,8 +198,9 @@ jobs:
           done) &
           curl -sSf https://lets.tunshell.com/init.sh | sh -s -- T $(cat peer1) $SECRET $RELAY
 
-      - 
+      -
         name: Docker Push
+        if: steps.ida9_revision.outputs.should_build == 'true'
         run: |
           DIGEST=${{ steps.docker_build_ida.outputs.digest }}
           docker tag ida:${{ matrix.tag_name }} nyamisty/docker-ida:${{ matrix.tag_name }}
