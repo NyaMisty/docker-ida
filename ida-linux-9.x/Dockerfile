@@ -55,6 +55,9 @@ RUN --mount=type=bind,src=${TOOL_PACKAGE},dst=/tmp/tools.tar \
 ADD keygen-v2.py /opt/ida
 RUN cd /opt/ida && python3 keygen-v2.py --oneshot --name docker-ida
 
+# Setup IDAPython
+RUN idapyswitch --force-path $(realpath $(dirname $(uv python find))/../lib/libpython3.*.so)
+
 # Setup idalib
 RUN if [ -f /opt/ida/idalib/python/setup.py ] || [ -f /opt/ida/idalib/python/pyproject.toml ]; then \
         pip install /opt/ida/idalib/python; \
@@ -69,4 +72,4 @@ RUN if [ -f /opt/ida/idalib/python/setup.py ] || [ -f /opt/ida/idalib/python/pyp
     fi
 
 # Bypass EULA Dialog
-RUN python3 -c "import idapro; import idaapi; idaapi.reg_write_int('EULA 90', 1)"
+RUN python3 -c "import idapro; import idaapi; idaapi.reg_write_int('EULA 90', 1); idaapi.reg_write_int('DisplayWelcome', 1); idaapi.reg_write_int('InformedAboutUpdates3', 1); idaapi.reg_write_int('AutoCheckUpdates', 0); idaapi.reg_write_int('AutoUseLumina', 0);"
