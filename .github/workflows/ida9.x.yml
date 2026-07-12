@@ -45,6 +45,7 @@ jobs:
             installer: ida-pro_93_x64linux.run
             build-args: |
               PYTHON_VERSION=3.12.10
+              QT=6
             tag_name: "9.3"
       fail-fast: false
 
